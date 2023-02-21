@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "include/raylib.h"
 
 #define SCREEN_WIDTH 480
@@ -16,6 +17,10 @@
 // Last positions that were moved
 // Used to draw a different color on the board
 int last_moves[2][2] = {{-1, -1}, {-1, -1}};
+
+// Load audio files
+Sound capture_sound;
+Sound move_sound;
 
 struct GameState {
 	int turn; // 0 = white, 1 = black
@@ -39,6 +44,22 @@ bool handle_click(int board[][8], int* coordinate)
 	return false;
 }
 
+int** add_move(int** possible_moves, int* num_moves, int x, int y)
+{
+	++(*num_moves);
+
+	int** temp = (int**) realloc(possible_moves, (*num_moves) * sizeof(int*));
+	if (temp) {
+		possible_moves = temp;
+		possible_moves[(*num_moves) - 1] = (int*) malloc(2 * sizeof(int));
+
+		possible_moves[(*num_moves) - 1][0] = x;
+		possible_moves[(*num_moves) - 1][1] = y;
+	}
+
+	return possible_moves;
+}
+
 /*
 	0 = pawn
 	1 = knight
@@ -54,21 +75,75 @@ bool handle_click(int board[][8], int* coordinate)
 	10 = queen
 	11 = king
 */
-int** find_possible_moves(int board[][8], int* piece_coordinate)
+int** find_possible_moves(int board[][8], int** possible_moves, int* piece_coordinate, int* num_moves)
 {
 	int piece = board[piece_coordinate[1]][piece_coordinate[0]];
-	int player = (piece < 6) ? 0 : 1;  // 0 for white, 1 for black
+	int player = (piece < 6) ? 0 : 1;  // 0 for black, 1 for white
+	if (player == 1) {
+		piece -= 6;
+	}
+
 	int x = piece_coordinate[0];
 	int y = piece_coordinate[1];
-	int** possible_moves = NULL;
 
 	switch (piece) {
 		case 0:  // Pawn
-			// Check if pawn is in initial position
-			// If it is:
-				// valid moves is either 1 ahead or 2 ahead
-			// If it's not in initial position:
-				// valid moves is either 1 ahead or two diagonals ahead if there's a piece there
+			// TODO: en passant
+			if (player == 0) { // Black
+				// Start position
+				if (y == 1 && board[y+2][x] == -1) {
+					possible_moves = add_move(possible_moves, num_moves, x, y+2);
+				}
+
+				// Normal move
+				if (y <= 7 && board[y+1][x] == -1) {
+					possible_moves = add_move(possible_moves, num_moves, x, y+1);
+
+				}
+
+				// Attack move lower-left
+				if (x > 0) {
+					int target = board[y+1][x-1];
+					if (target > 5 && target <= 11) {
+						possible_moves = add_move(possible_moves, num_moves, x-1, y+1);
+					}
+				}
+
+				// Attack move lower-right
+				if (x < 7) {
+					int target = board[y+1][x+1];
+					if (target > 5 && target <= 11) {
+						possible_moves = add_move(possible_moves, num_moves, x+1, y+1);
+					}
+				}
+			} else if (player == 1) { // White
+				// Start position
+				if (y == 6 && board[y-2][x] == -1) {
+					possible_moves = add_move(possible_moves, num_moves, x, y-2);
+				}
+
+				// Normal move
+				if (y >= 0 && board[y-1][x] == -1) {
+					possible_moves = add_move(possible_moves, num_moves, x, y-1);
+
+				}
+
+				// Attack move upper-left
+				if (x > 0) {
+					int target = board[y-1][x-1];
+					if (target >= 0 && target < 6) {
+						possible_moves = add_move(possible_moves, num_moves, x-1, y-1);
+					}
+				}
+
+				// Attack move upper-right
+				if (x < 7) {
+					int target = board[y-1][x+1];
+					if (target >= 0 && target < 6) {
+						possible_moves = add_move(possible_moves, num_moves, x+1, y-1);
+					}
+				}
+			}
 			break;
 		case 1:  // Knight
 
@@ -106,19 +181,44 @@ bool is_move_valid(int board[][8], int* piece_coordinate, int* move_coordinate, 
 	// Make sure the piece and the move coordinates are not the same
 	if (piece_x == move_x && piece_y == move_y) return false;
 
-	printf("Attacker: %d; Move:(%d, %d)->(%d, %d); Target: %d\n", attacker, piece_x, piece_y, move_x, move_y, board[move_y][move_x]);
+	//printf("Attacker: %d; Move:(%d, %d)->(%d, %d); Target: %d\n", attacker, piece_x, piece_y, move_x, move_y, board[move_y][move_x]);
 
 	// TODO: check if requested move is in possible moves
-	int** possible_moves = find_possible_moves(board, piece_coordinate);
+	int num_moves = 0;
+	int** possible_moves = NULL;
+	possible_moves = find_possible_moves(board, possible_moves, piece_coordinate, &num_moves);
 
-	return true;
+	if (possible_moves != NULL) {
+		for (int i = 0; i < num_moves; ++i) {
+			if (possible_moves[i] != NULL) {
+				if ((possible_moves[i][0] == move_x) && (possible_moves[i][1] == move_y)) return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 void move(int board[][8], int* piece_coordinate, int* move_coordinate)
 {
 	int piece = board[piece_coordinate[1]][piece_coordinate[0]];
 	board[piece_coordinate[1]][piece_coordinate[0]] = -1;
-	board[move_coordinate[1]][move_coordinate[0]] = piece;
+
+	if (board[move_coordinate[1]][move_coordinate[0]] != -1) {
+		PlaySound(capture_sound);
+	} else {
+		PlaySound(move_sound);
+	}
+
+	if (piece == 0 && move_coordinate[1] == 7) {
+		// If black piece moves to end of board turns to queen
+		board[move_coordinate[1]][move_coordinate[0]] = 4;
+	} else if (piece == 6 && move_coordinate[1] == 0) {
+		// If white piece moves to end of board turns to queen
+		board[move_coordinate[1]][move_coordinate[0]] = 10;
+	} else {
+		board[move_coordinate[1]][move_coordinate[0]] = piece;
+	}
 
 	last_moves[0][0] = piece_coordinate[0];
 	last_moves[0][1] = piece_coordinate[1];
@@ -149,10 +249,10 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 		game->clicked_piece_pos[1] = y;
 		game->clicked_piece = true;
 	} else { // Selecting place to move piece
+		game->clicked_piece = false;
 		if (game->turn == 0) { // White Turn
 			// Tried to move white on white
 			if (piece > 5) {
-				game->clicked_piece = false;
 				return false;
 			}
 
@@ -160,13 +260,11 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 				move(board, piece_coordinate, move_coordinate);
 				game->turn = 1;
 			} else {
-				printf("Invalid move (%d, %d)\n", move_coordinate[0], move_coordinate[1]);
 				return false;
 			}
 		} else { // Black Turn
 			// Tried to move black on black
 			if (piece >= 0 && piece < 6) {
-				game->clicked_piece = false;
 				return false;
 			}
 
@@ -174,12 +272,9 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 				move(board, piece_coordinate, move_coordinate);
 				game->turn = 0;
 			} else {
-				printf("Invalid move (%d, %d)\n", move_coordinate[0], move_coordinate[1]);
 				return false;
 			}
 		}
-
-		game->clicked_piece = false;
 	}
 
 	return true;
@@ -231,8 +326,13 @@ int main(int argc, char* argv[])
 	// Initialize game constants
 	struct GameState game = {0, false, {-1, -1}};
 
-	// Create Window
+	// Create Window and init sounds
 	InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Chess");
+	InitAudioDevice();
+
+	// Load sounds
+	capture_sound = LoadSound("sounds/capture.mp3");
+	move_sound = LoadSound("sounds/move.mp3");
 
 	// Load texture of each piece
 	Texture2D pieces[12];
@@ -282,6 +382,10 @@ int main(int argc, char* argv[])
 		EndDrawing();
 	}
 
+	// Clean up resources
+	UnloadSound(capture_sound);
+	UnloadSound(move_sound);
+	CloseAudioDevice();
 	CloseWindow();
 
 	return 0;
