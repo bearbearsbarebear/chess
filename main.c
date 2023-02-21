@@ -26,6 +26,8 @@ struct GameState {
 	int turn; 					// 0 = white, 1 = black
 	bool clicked_piece; 		// rather a piece has been selected or not
 	int clicked_piece_pos[2]; 	// position of the selected piece
+	int num_moves;
+	int** possible_moves;		// possible moves to draw on screen
 };
 
 // This function takes an array to store the coordinates of the clicked square
@@ -70,21 +72,169 @@ int** add_move(int** possible_moves, int* num_moves, int x, int y)
 	return possible_moves;
 }
 
-/*
-	0 = pawn
-	1 = knight
-	2 = bishop
-	3 = rook
-	4 = queen
-	5 = king
+// TODO: en passant
+int** find_pawn_moves(int board[][8], int** possible_moves, int* num_moves, int piece, int player, int x, int y)
+{
+	// Black pawns move in the +y direction, white pawns move in the -y direction
+	int direction = player == 0 ? 1 : -1;
 
-	6 = pawn
-	7 = knight
-	8 = bishop
-	9 = rook
-	10 = queen
-	11 = king
-*/
+	// Normal move
+	if (board[y+direction][x] == -1) {
+		possible_moves = add_move(possible_moves, num_moves, x, y+direction);
+	}
+
+	// Start position
+	if ((y == 1 && player == 0) || (y == 6 && player == 1)) {
+		if (board[y+2*direction][x] == -1 && board[y+direction][x] == -1) {
+			possible_moves = add_move(possible_moves, num_moves, x, y+2*direction);
+		}
+	}
+
+	// Attack move
+	if (x > 0 && board[y+direction][x-1] >= (player == 0 ? 6 : 0) && board[y+direction][x-1] < (player == 0 ? 12 : 6)) {
+		possible_moves = add_move(possible_moves, num_moves, x-1, y+direction);
+	}
+
+	if (x < 7 && board[y+direction][x+1] >= (player == 0 ? 6 : 0) && board[y+direction][x+1] < (player == 0 ? 12 : 6)) {
+		possible_moves = add_move(possible_moves, num_moves, x+1, y+direction);
+	}
+
+	return possible_moves;
+}
+
+int** find_knight_moves(int board[][8], int** possible_moves, int* num_moves, int piece, int player, int x, int y)
+{
+	// Possible L-shaped moves
+	// xd and dy represent the x and y offsets of each 
+	// of the eight possible L-shaped moves
+	int dx[8] = { 1, 2, 2, 1, -1, -2, -2, -1 };
+	int dy[8] = { 2, 1, -1, -2, -2, -1, 1, 2 };
+
+	// Check each possible L-shaped move
+	for (int i = 0; i < 8; i++) {
+		int cx = x + dx[i];
+		int cy = y + dy[i];
+
+		if (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
+			int target = board[cy][cx];
+
+			// If the target square is empty or has an opponent's piece, add it to the list of possible moves
+			if (target == -1 || (player == 0 && target > 5 && target <= 11) || (player == 1 && target >= 0 && target < 6)) {
+				possible_moves = add_move(possible_moves, num_moves, cx, cy);
+			}
+		}
+	}
+
+	return possible_moves;
+}
+
+int** find_bishop_moves(int board[][8], int** possible_moves, int* num_moves, int piece, int player, int x, int y)
+{
+	for (int dirx = -1; dirx <= 1; dirx += 2) {
+		for (int diry = -1; diry <= 1; diry += 2) {
+			if (dirx == 0 && diry == 0) continue;
+
+			int cx = x + dirx;
+			int cy = y + diry;
+			while (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
+				int target = board[cy][cx];
+
+				if (target == -1) {
+					possible_moves = add_move(possible_moves, num_moves, cx, cy);
+				} else if ((player == 0 && target > 5 && target <= 11) || (player == 1 && target >= 0 && target < 6)) {
+					possible_moves = add_move(possible_moves, num_moves, cx, cy);
+					break;
+				} else {
+					break;
+				}
+
+				cx += dirx;
+				cy += diry;
+			}
+		}
+	}
+	return possible_moves;
+}
+
+int** find_rook_moves(int board[][8], int** possible_moves, int* num_moves, int piece, int player, int x, int y)
+{
+	for (int dirx = -1; dirx <= 1; ++dirx) {
+		for (int diry = -1; diry <= 1; ++diry) {
+			if (dirx == 0 && diry == 0) continue;
+			if (dirx % 2 != 0 && diry % 2 != 0) continue;
+
+			int cx = x + dirx;
+			int cy = y + diry;
+			while (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
+				int target = board[cy][cx];
+
+				if (target == -1) {
+					possible_moves = add_move(possible_moves, num_moves, cx, cy);
+				} else if ((player == 0 && target > 5 && target <= 11) || (player == 1 && target >= 0 && target < 6)) {
+					possible_moves = add_move(possible_moves, num_moves, cx, cy);
+					break;
+				} else {
+					break;
+				}
+
+				cx += dirx;
+				cy += diry;
+			}
+		}
+	}
+
+	return possible_moves;
+}
+
+int** find_queen_moves(int board[][8], int** possible_moves, int* num_moves, int piece, int player, int x, int y)
+{
+	for (int dirx = -1; dirx <= 1; ++dirx) {
+		for (int diry = -1; diry <= 1; ++diry) {
+			if (dirx == 0 && diry == 0) continue;
+
+			int cx = x + dirx;
+			int cy = y + diry;
+			while (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
+				int target = board[cy][cx];
+
+				if (target == -1) {
+					possible_moves = add_move(possible_moves, num_moves, cx, cy);
+				} else if ((player == 0 && target > 5 && target <= 11) || (player == 1 && target >= 0 && target < 6)) {
+					possible_moves = add_move(possible_moves, num_moves, cx, cy);
+					break;
+				} else {
+					break;
+				}
+
+				cx += dirx;
+				cy += diry;
+			}
+		}
+	}
+
+	return possible_moves;
+}
+
+int** find_king_moves(int board[][8], int** possible_moves, int* num_moves, int piece, int player, int x, int y)
+{
+	for (int dx = -1; dx <= 1; ++dx) {
+		for (int dy = -1; dy <= 1; ++dy) {
+			if (dx == 0 && dy == 0) continue;
+
+			int cx = x + dx;
+			int cy = y + dy;
+			if (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
+				int target = board[cy][cx];
+				if (target == -1 || ((player == 0 && target > 5 && target <= 11) || (player == 1 && target >= 0 && target < 6))) {
+					possible_moves = add_move(possible_moves, num_moves, cx, cy);
+				}
+			}
+		}
+	}
+
+	return possible_moves;
+}
+
 int** find_possible_moves(int board[][8], int** possible_moves, int* piece_coordinate, int* num_moves)
 {
 	int piece = board[piece_coordinate[1]][piece_coordinate[0]];
@@ -96,77 +246,22 @@ int** find_possible_moves(int board[][8], int** possible_moves, int* piece_coord
 
 	switch (piece) {
 		case 0:  // Pawn
-			// TODO: en passant
-			if (player == 0) { // Black
-				// Start position
-				if (y == 1 && board[y+2][x] == -1) {
-					possible_moves = add_move(possible_moves, num_moves, x, y+2);
-				}
-
-				// Normal move
-				if (y <= 7 && board[y+1][x] == -1) {
-					possible_moves = add_move(possible_moves, num_moves, x, y+1);
-
-				}
-
-				// Attack move lower-left
-				if (x > 0) {
-					int target = board[y+1][x-1];
-					if (target > 5 && target <= 11) {
-						possible_moves = add_move(possible_moves, num_moves, x-1, y+1);
-					}
-				}
-
-				// Attack move lower-right
-				if (x < 7) {
-					int target = board[y+1][x+1];
-					if (target > 5 && target <= 11) {
-						possible_moves = add_move(possible_moves, num_moves, x+1, y+1);
-					}
-				}
-			} else if (player == 1) { // White
-				// Start position
-				if (y == 6 && board[y-2][x] == -1) {
-					possible_moves = add_move(possible_moves, num_moves, x, y-2);
-				}
-
-				// Normal move
-				if (y >= 0 && board[y-1][x] == -1) {
-					possible_moves = add_move(possible_moves, num_moves, x, y-1);
-
-				}
-
-				// Attack move upper-left
-				if (x > 0) {
-					int target = board[y-1][x-1];
-					if (target >= 0 && target < 6) {
-						possible_moves = add_move(possible_moves, num_moves, x-1, y-1);
-					}
-				}
-
-				// Attack move upper-right
-				if (x < 7) {
-					int target = board[y-1][x+1];
-					if (target >= 0 && target < 6) {
-						possible_moves = add_move(possible_moves, num_moves, x+1, y-1);
-					}
-				}
-			}
+			possible_moves = find_pawn_moves(board, possible_moves, num_moves, piece, player, x, y);
 			break;
 		case 1:  // Knight
-
+			possible_moves = find_knight_moves(board, possible_moves, num_moves, piece, player, x, y);
 			break;
 		case 2:  // Bishop
-
+			possible_moves = find_bishop_moves(board, possible_moves, num_moves, piece, player, x, y);
 			break;
 		case 3:  // Rook
-
+			possible_moves = find_rook_moves(board, possible_moves, num_moves, piece, player, x, y);
 			break;
 		case 4:  // Queen
-
+			possible_moves = find_queen_moves(board, possible_moves, num_moves, piece, player, x, y);
 			break;
 		case 5:  // King
-
+			possible_moves = find_king_moves(board, possible_moves, num_moves, piece, player, x, y);
 			break;
 		default:
 			break;
@@ -194,7 +289,7 @@ void free_moves(int** moves, int num_moves)
  * 
  * returns true if the move is valid, false otherwise.
  */
-bool is_move_valid(int board[][8], int* piece_coordinate, int* move_coordinate)
+bool is_move_valid(int board[][8], int* piece_coordinate, int* move_coordinate, struct GameState* game)
 {
 	// Get the piece and move coordinates
 	int piece_x = piece_coordinate[0];
@@ -209,9 +304,8 @@ bool is_move_valid(int board[][8], int* piece_coordinate, int* move_coordinate)
 	if (piece_x == move_x && piece_y == move_y) return false;
 
 	// Find all possible moves for the piece
-	int num_moves = 0;
-	int** possible_moves = NULL;
-	possible_moves = find_possible_moves(board, possible_moves, piece_coordinate, &num_moves);
+	int num_moves = game->num_moves;
+	int** possible_moves = game->possible_moves;
 
 	// Check if the move is one of the possible moves
 	if (possible_moves != NULL) {
@@ -305,10 +399,18 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 		// Updates 'piece_coordinate' for the selected piece to move
 		piece_coordinate[0] = x;
 		piece_coordinate[1] = y;
+
 		// Updates game->clicked_piece_pos and game->clicked_piece for the draw function
 		game->clicked_piece_pos[0] = x;
 		game->clicked_piece_pos[1] = y;
 		game->clicked_piece = true;
+
+		// Update game->possible_moves of the clicked piece
+		int num_moves = 0;
+		int** possible_moves = NULL;
+		possible_moves = find_possible_moves(board, possible_moves, piece_coordinate, &num_moves);
+		game->num_moves = num_moves;
+		game->possible_moves = possible_moves;
 	} else { // Selecting place to move piece
 		// Deselects the selected piece
 		game->clicked_piece = false;
@@ -317,7 +419,7 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 			if (piece > 5) return false;
 
 			// If the move position is valid, calls move, otherwise returns false
-			if (is_move_valid(board, piece_coordinate, move_coordinate)) {
+			if (is_move_valid(board, piece_coordinate, move_coordinate, game)) {
 				move(board, piece_coordinate, move_coordinate);
 				game->turn = 1;
 			} else {
@@ -328,7 +430,7 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 			if (piece >= 0 && piece < 6) return false;
 
 			// If the move position is valid, calls move, otherwise returns false
-			if (is_move_valid(board, piece_coordinate, move_coordinate)) {
+			if (is_move_valid(board, piece_coordinate, move_coordinate, game)) {
 				move(board, piece_coordinate, move_coordinate);
 				game->turn = 0;
 			} else {
@@ -376,12 +478,31 @@ void draw_board(Texture2D pieces[12], int board[8][8], struct GameState game)
 			// Draw the pieces of each position
 			int piece = board[j][i];
 			if (piece != -1) DrawTexture(pieces[piece], x, y, WHITE);
+
+			// Draws all the position from the selected piece
+			if (game.clicked_piece == true) {
+				if (game.possible_moves != NULL && game.num_moves > 0) {
+					for (int k = 0; k < game.num_moves; ++k) {
+						int move_pos_x = game.possible_moves[k][0];
+						int move_pos_y = game.possible_moves[k][1];
+
+						if (i == move_pos_x && j == move_pos_y) {
+							if (board[j][i] != -1) {
+								DrawRectangleLinesEx((Rectangle){x, y, SQUARE_SIZE, SQUARE_SIZE}, 3, RED);
+							} else {
+								Vector2 center = { (float)(x + SQUARE_SIZE/2), (float)(y + SQUARE_SIZE/2) };
+								DrawRing(center, 8.0, 0.0, 0, 360, 0, RED);							
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 }
 
-// TODO: check both kings to see if they have possible moves in case they are being attacked
-bool is_checkmate(int board[][8])
+// TODO: check kings to see if they have possible moves in case they are being attacked
+bool is_king_in_check(int board[][8], int player, int king_x, int king_y) 
 {
 	return false;
 }
@@ -428,8 +549,7 @@ int main(int argc, char* argv[])
 
 	// Game main loop
 	while (!WindowShouldClose()) {
-		// If it's a checkmate game must end
-		if (is_checkmate(board)) break;
+		// TODO: If it's a checkmate game must end
 
 		// Calls raylib's draw function and paints background white
 		BeginDrawing();
