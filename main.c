@@ -23,40 +23,50 @@ Sound capture_sound;
 Sound move_sound;
 
 struct GameState {
-	int turn; // 0 = white, 1 = black
-	bool clicked_piece;
-	int clicked_piece_pos[2];
+	int turn; 					// 0 = white, 1 = black
+	bool clicked_piece; 		// rather a piece has been selected or not
+	int clicked_piece_pos[2]; 	// position of the selected piece
 };
 
-bool handle_click(int board[][8], int* coordinate)
+// This function takes an array to store the coordinates of the clicked square
+bool handle_click(int* coordinate)
 {
+	// Check if the left mouse button has been pressed
 	if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
 		// Get the mouse position
 		Vector2 mouse_pos = GetMousePosition();
 
-		// Convert the mouse position to a position on the board
+		// Convert the position of the mouse to the corresponding position on the chess board
 		coordinate[0] = (int) floor(mouse_pos.x / SQUARE_SIZE);
 		coordinate[1] = (int) floor(mouse_pos.y / SQUARE_SIZE);
 
+		// Return true to indicate that a click has been handled and coordinates have been updated
 		return true;
 	}
 
+	// If the mouse button has not been clicked, return false to indicate that no action has been taken
 	return false;
 }
 
 int** add_move(int** possible_moves, int* num_moves, int x, int y)
 {
+	// Increment the count of the number of possible moves
 	++(*num_moves);
 
+	// Resize the `possible_moves` array to make space for the new move
 	int** temp = (int**) realloc(possible_moves, (*num_moves) * sizeof(int*));
+
+	// If the reallocation was successful, update the `possible_moves` pointer
 	if (temp) {
 		possible_moves = temp;
-		possible_moves[(*num_moves) - 1] = (int*) malloc(2 * sizeof(int));
 
+		// Allocate space for the new move and add it to the end of the list
+		possible_moves[(*num_moves) - 1] = (int*) malloc(2 * sizeof(int));
 		possible_moves[(*num_moves) - 1][0] = x;
 		possible_moves[(*num_moves) - 1][1] = y;
 	}
 
+	// Return a pointer to the updated `possible_moves` array
 	return possible_moves;
 }
 
@@ -79,9 +89,7 @@ int** find_possible_moves(int board[][8], int** possible_moves, int* piece_coord
 {
 	int piece = board[piece_coordinate[1]][piece_coordinate[0]];
 	int player = (piece < 6) ? 0 : 1;  // 0 for black, 1 for white
-	if (player == 1) {
-		piece -= 6;
-	}
+	if (player == 1) piece -= 6;
 
 	int x = piece_coordinate[0];
 	int y = piece_coordinate[1];
@@ -167,13 +175,32 @@ int** find_possible_moves(int board[][8], int** possible_moves, int* piece_coord
 	return possible_moves;
 }
 
-bool is_move_valid(int board[][8], int* piece_coordinate, int* move_coordinate, struct GameState* game)
+// Frees the moves found by 'is_move_valid'
+void free_moves(int** moves, int num_moves)
 {
+	for (int i = 0; i < num_moves; ++i) {
+		free(moves[i]);
+	}
+
+	free(moves);
+}
+
+/*
+ * Check if a move is valid for a given piece on the board.
+ * 
+ * 'board' The chess board.
+ * 'piece_coordinate' The coordinate of the piece to move.
+ * 'move_coordinate' The coordinate to move the piece to.
+ * 
+ * returns true if the move is valid, false otherwise.
+ */
+bool is_move_valid(int board[][8], int* piece_coordinate, int* move_coordinate)
+{
+	// Get the piece and move coordinates
 	int piece_x = piece_coordinate[0];
 	int piece_y = piece_coordinate[1];
 	int move_x = move_coordinate[0];
 	int move_y = move_coordinate[1];
-	int attacker = board[piece_y][piece_x];
 
 	// Make sure the piece is on the board
 	if (piece_x < 0 || piece_x > 7 || piece_y < 0 || piece_y > 7) return false;
@@ -181,29 +208,47 @@ bool is_move_valid(int board[][8], int* piece_coordinate, int* move_coordinate, 
 	// Make sure the piece and the move coordinates are not the same
 	if (piece_x == move_x && piece_y == move_y) return false;
 
-	//printf("Attacker: %d; Move:(%d, %d)->(%d, %d); Target: %d\n", attacker, piece_x, piece_y, move_x, move_y, board[move_y][move_x]);
-
-	// TODO: check if requested move is in possible moves
+	// Find all possible moves for the piece
 	int num_moves = 0;
 	int** possible_moves = NULL;
 	possible_moves = find_possible_moves(board, possible_moves, piece_coordinate, &num_moves);
 
+	// Check if the move is one of the possible moves
 	if (possible_moves != NULL) {
 		for (int i = 0; i < num_moves; ++i) {
 			if (possible_moves[i] != NULL) {
-				if ((possible_moves[i][0] == move_x) && (possible_moves[i][1] == move_y)) return true;
+				if ((possible_moves[i][0] == move_x) && (possible_moves[i][1] == move_y)) {
+					// The move is valid
+					// free the memory used by 'possible_moves' and return true
+					free_moves(possible_moves, num_moves);
+					return true;
+				}
 			}
 		}
 	}
-
+	// The move is not one of the possible moves
+	// free the memory used by 'possible_moves' and return false
+	free_moves(possible_moves, num_moves);
 	return false;
 }
 
+/*
+ * Makes a move on the board.
+ *
+ * 'board' The chess board.
+ * 'piece_coordinate' The coordinate of the piece to move.
+ * 'move_coordinate' The coordinate to move the piece to.
+ *
+ */
 void move(int board[][8], int* piece_coordinate, int* move_coordinate)
 {
+	// Retrieve what the moved piece is
 	int piece = board[piece_coordinate[1]][piece_coordinate[0]];
+
+	// Changes piece's position to empty
 	board[piece_coordinate[1]][piece_coordinate[0]] = -1;
 
+	// Play sound depending if it's a move or a capture
 	if (board[move_coordinate[1]][move_coordinate[0]] != -1) {
 		PlaySound(capture_sound);
 	} else {
@@ -217,22 +262,36 @@ void move(int board[][8], int* piece_coordinate, int* move_coordinate)
 		// If white piece moves to end of board turns to queen
 		board[move_coordinate[1]][move_coordinate[0]] = 10;
 	} else {
+		// If it's a normal move/capture, just overwrites position to piece value
 		board[move_coordinate[1]][move_coordinate[0]] = piece;
 	}
 
+	// Updates 'last_moves' positions to for the draw function
 	last_moves[0][0] = piece_coordinate[0];
 	last_moves[0][1] = piece_coordinate[1];
 	last_moves[1][0] = move_coordinate[0];
 	last_moves[1][1] = move_coordinate[1];
 }
 
+/*
+ * Checks if the click on the screen is a valid click
+ *
+ * 'board' The chess board.
+ * 'piece_coordinate' The coordinate of the piece to move.
+ * 'move_coordinate' The coordinate to move the piece to.
+ * 'game' The current state of the game.
+ *
+ */
 bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate, struct GameState* game)
 {
+	// Get move position
 	int x = move_coordinate[0];
 	int y = move_coordinate[1];
+	// Get the piece from the move position
 	int piece = board[y][x];
 
 	if (game->clicked_piece == false) { // Selecting piece to move
+		// If clicked on empty space returns false
 		if (piece == -1) return false;
 
 		if (game->turn == 0) { // White Turn
@@ -243,20 +302,22 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 			if (piece < 0 || piece > 5) return false;
 		}
 
+		// Updates 'piece_coordinate' for the selected piece to move
 		piece_coordinate[0] = x;
 		piece_coordinate[1] = y;
+		// Updates game->clicked_piece_pos and game->clicked_piece for the draw function
 		game->clicked_piece_pos[0] = x;
 		game->clicked_piece_pos[1] = y;
 		game->clicked_piece = true;
 	} else { // Selecting place to move piece
+		// Deselects the selected piece
 		game->clicked_piece = false;
 		if (game->turn == 0) { // White Turn
 			// Tried to move white on white
-			if (piece > 5) {
-				return false;
-			}
+			if (piece > 5) return false;
 
-			if (is_move_valid(board, piece_coordinate, move_coordinate, game)) {
+			// If the move position is valid, calls move, otherwise returns false
+			if (is_move_valid(board, piece_coordinate, move_coordinate)) {
 				move(board, piece_coordinate, move_coordinate);
 				game->turn = 1;
 			} else {
@@ -264,11 +325,10 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 			}
 		} else { // Black Turn
 			// Tried to move black on black
-			if (piece >= 0 && piece < 6) {
-				return false;
-			}
+			if (piece >= 0 && piece < 6) return false;
 
-			if (is_move_valid(board, piece_coordinate, move_coordinate, game)) {
+			// If the move position is valid, calls move, otherwise returns false
+			if (is_move_valid(board, piece_coordinate, move_coordinate)) {
 				move(board, piece_coordinate, move_coordinate);
 				game->turn = 0;
 			} else {
@@ -277,6 +337,7 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 		}
 	}
 
+	// Return true after the move was finished
 	return true;
 }
 
@@ -288,19 +349,23 @@ void draw_board(Texture2D pieces[12], int board[8][8], struct GameState game)
 	Color last_move_color = (Color) {42, 75, 130, 255};
 	Color clicked_piece_color = (Color) {96, 136, 204, 255};
 
+	// Iterates through the board
 	for (int i = 0; i < BOARD_SIZE; ++i) {
 		for (int j = 0; j < BOARD_SIZE; ++j) {
 			// Calculate the position of the square
 			int x = i * SQUARE_SIZE;
 			int y = j * SQUARE_SIZE;
 
-			// Set the color of the square
+			// Sets the color of each square based on position
 			if (((i == last_moves[0][0] && j == last_moves[0][1]) || (i == last_moves[1][0] && j == last_moves[1][1])) && last_moves[0][0] != -1) {
+				// Paints the last move position
 				DrawRectangle(x, y, SQUARE_SIZE, SQUARE_SIZE, last_move_color);
 			} else if (game.clicked_piece && (i == game.clicked_piece_pos[0] && j == game.clicked_piece_pos[1])) {
+				// Paints the clicked piece position
 				DrawRectangle(x, y, SQUARE_SIZE, SQUARE_SIZE, clicked_piece_color);
 			} 
 			else {
+				// Paints the board
 				if ((i + j) % 2 == 0) {
 					DrawRectangle(x, y, SQUARE_SIZE, SQUARE_SIZE, dark_color);
 				} else {
@@ -308,7 +373,7 @@ void draw_board(Texture2D pieces[12], int board[8][8], struct GameState game)
 				}
 			}
 
-			// Draw the piece
+			// Draw the pieces of each position
 			int piece = board[j][i];
 			if (piece != -1) DrawTexture(pieces[piece], x, y, WHITE);
 		}
@@ -342,7 +407,6 @@ int main(int argc, char* argv[])
 	pieces[3] = LoadTexture("images/rook_b.png");
 	pieces[4] = LoadTexture("images/queen_b.png");
 	pieces[5] = LoadTexture("images/king_b.png");
-
 	pieces[6] = LoadTexture("images/pawn_w.png");
 	pieces[7] = LoadTexture("images/knight_w.png");
 	pieces[8] = LoadTexture("images/bishop_w.png");
@@ -362,23 +426,32 @@ int main(int argc, char* argv[])
 		{9, 7, 8, 10, 11, 8, 7, 9}
 	};
 
+	// Game main loop
 	while (!WindowShouldClose()) {
+		// If it's a checkmate game must end
 		if (is_checkmate(board)) break;
 
+		// Calls raylib's draw function and paints background white
 		BeginDrawing();
 		ClearBackground(RAYWHITE);
 
-		// Draw the game
+		// Draw the board
 		draw_board(pieces, board, game);
 
+		// Coordinates for moves and selected pieces
 		int move_coordinate[2];
 		int piece_coordinate[2];
-		if (handle_click(board, move_coordinate)) {
+
+		// If the player clicks on the screen, puts the position at 'move_coordinate'
+		if (handle_click(move_coordinate)) {
+			// Checks if the click on the screen is a valid click
+			// If it's valid, either select the piece or do the desired move
 			if (!is_click_valid(board, piece_coordinate, move_coordinate, &game)) {
 				printf("Invalid move (%d, %d)\n", move_coordinate[0], move_coordinate[1]);
 			}
 		}
 
+		// Calls raylib's function to finish drawing
 		EndDrawing();
 	}
 
