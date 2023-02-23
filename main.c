@@ -2,6 +2,15 @@
 // gcc -o main main.c -L./lib -I./include -lraylib -lm -lpthread -ldl -lrt -lX11 
 // ./main
 
+/* TODO:
+ * En passant of pawns
+ * Checkmate
+ * Check mechanic:
+ *	1. If a king is in check, movement should be defined based on the check position
+ *	2. The king can't move to a position that would get itself into check
+ *	3. Pieces can't be moved to a position that would make their king get into check
+ */
+
 #include <stdio.h>
 #include <math.h>
 #include <stdbool.h>
@@ -28,6 +37,8 @@ struct GameState {
 	int clicked_piece_pos[2]; 	// position of the selected piece
 	int num_moves;
 	int** possible_moves;		// possible moves to draw on screen
+	bool is_in_check;
+	int attacker_position[2]; 	// Piece attacking the king making the check
 };
 
 // This function takes an array to store the coordinates of the clicked square
@@ -215,6 +226,7 @@ int** find_queen_moves(int board[][8], int** possible_moves, int* num_moves, int
 	return possible_moves;
 }
 
+// TODO: incomplete
 int** find_king_moves(int board[][8], int** possible_moves, int* num_moves, int piece, int player, int x, int y)
 {
 	for (int dx = -1; dx <= 1; ++dx) {
@@ -235,7 +247,7 @@ int** find_king_moves(int board[][8], int** possible_moves, int* num_moves, int 
 	return possible_moves;
 }
 
-int** find_possible_moves(int board[][8], int** possible_moves, int* piece_coordinate, int* num_moves)
+int** find_possible_moves(int board[][8], int** possible_moves, int* piece_coordinate, int* num_moves, struct GameState* game)
 {
 	int piece = board[piece_coordinate[1]][piece_coordinate[0]];
 	int player = (piece < 6) ? 0 : 1;  // 0 for black, 1 for white
@@ -270,7 +282,7 @@ int** find_possible_moves(int board[][8], int** possible_moves, int* piece_coord
 	return possible_moves;
 }
 
-// Frees the moves found by 'is_move_valid'
+// Free the moves
 void free_moves(int** moves, int num_moves)
 {
 	for (int i = 0; i < num_moves; ++i) {
@@ -278,6 +290,76 @@ void free_moves(int** moves, int num_moves)
 	}
 
 	free(moves);
+}
+
+bool is_move_in_array_of_moves(int** moves, int num_moves, int x, int y)
+{
+	for (int i = 0; i < num_moves; ++i) {
+		if ((moves[i][0] == x) && (moves[i][1] == y)) return true;
+	}
+
+	return false;
+}
+
+// Returns in game->attacker_position the position of the attacker
+bool is_position_being_attacked(int board[][8], int x, int y, struct GameState* game) 
+{
+	int victim = (board[y][x] < 6) ? 0 : 1; // 0 = black, 1 = white
+
+	for (int i = 0; i < 8; ++i) {
+		for (int j = 0; j < 8; ++j) {
+			if (board[j][i] != -1) {
+				int piece = board[j][i];
+				if (victim == 0 && piece >= 6 && piece <= 11) { // Black being attacked by white
+					int num_moves = 0;
+					int** possible_moves = NULL;
+					int position[2] = {i, j};
+					possible_moves = find_possible_moves(board, possible_moves, position, &num_moves, game);
+
+					if (is_move_in_array_of_moves(possible_moves, num_moves, x, y)) {
+						game->attacker_position[0] = i;
+						game->attacker_position[1] = j;
+						return true;
+					}
+
+					free_moves(possible_moves, num_moves);
+				} else if (victim == 1 && piece >= 0 && piece <= 5) { // White being attacked by black
+					int num_moves = 0;
+					int** possible_moves = NULL;
+					int position[2] = {i, j};
+					possible_moves = find_possible_moves(board, possible_moves, position, &num_moves, game);
+
+					if (is_move_in_array_of_moves(possible_moves, num_moves, x, y)) {
+						game->attacker_position[0] = i;
+						game->attacker_position[1] = j;
+						return true;
+					}
+
+					free_moves(possible_moves, num_moves);
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+bool is_king_in_check(int board[][8], struct GameState* game)
+{
+	for (int i = 0; i < 8; ++i) {
+		for (int j = 0; j < 8; ++j) {
+			int piece = board[j][i];
+			if (piece == 5) { // Black King
+				if (is_position_being_attacked(board, i, j, game)) {
+					return true;
+				}
+			} else if (piece == 11) { // White King
+				if (is_position_being_attacked(board, i, j, game)) return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 /*
@@ -320,6 +402,7 @@ bool is_move_valid(int board[][8], int* piece_coordinate, int* move_coordinate, 
 			}
 		}
 	}
+
 	// The move is not one of the possible moves
 	// free the memory used by 'possible_moves' and return false
 	free_moves(possible_moves, num_moves);
@@ -408,7 +491,7 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 		// Update game->possible_moves of the clicked piece
 		int num_moves = 0;
 		int** possible_moves = NULL;
-		possible_moves = find_possible_moves(board, possible_moves, piece_coordinate, &num_moves);
+		possible_moves = find_possible_moves(board, possible_moves, piece_coordinate, &num_moves, game);
 		game->num_moves = num_moves;
 		game->possible_moves = possible_moves;
 	} else { // Selecting place to move piece
@@ -436,6 +519,14 @@ bool is_click_valid(int board[][8], int* piece_coordinate, int* move_coordinate,
 			} else {
 				return false;
 			}
+		}
+
+		// After a move is done, checks if the king is in check and updates game->is_in_check
+		if (is_king_in_check(board, game)) {
+			game->is_in_check = true;
+			printf("King is in check by (%d, %d)\n", game->attacker_position[0], game->attacker_position[1]);
+		} else {
+			game->is_in_check = false;
 		}
 	}
 
@@ -499,12 +590,6 @@ void draw_board(Texture2D pieces[12], int board[8][8], struct GameState game)
 			}
 		}
 	}
-}
-
-// TODO: check kings to see if they have possible moves in case they are being attacked
-bool is_king_in_check(int board[][8], int player, int king_x, int king_y) 
-{
-	return false;
 }
 
 int main(int argc, char* argv[])
